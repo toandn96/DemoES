@@ -1,0 +1,82 @@
+												
+1/ API get thông tin cửa hàng												
+												
+	URI: /store/storeinfo											
+	Method: GET											
+												
+	Request param:											
+		storeID				String (12ký tự)						là param bắt buộc
+												
+	Trường hợp thành công và get được data											
+	Response											
+		Http response: 200										
+		storeID				String (12 ký tự)						
+		storeName				String (255 ký tự)						
+		storeAddress				String (255 ký tự)						
+												
+	Trường hợp thành công và không get được data											
+	Response											
+		Http response: 404										
+		message: không get được thông tin store										
+												
+	Trường hợp error khi validate param											
+		Response										
+			Http response: 400									
+			result: 1									
+			message: lỗi phát sinh									
+												
+2/ API get danh sách cửa hàng												
+												
+	URI: /store/storeList											
+	Method: POST											
+												
+												
+	Request body:											
+		listStore										
+			storeID				String (12 ký tự)					
+												
+	Trường hợp thành công và get được data											
+	Response											
+		Http response: 200										
+		listStore										
+			storeID									
+			storeName									
+			storeAddress									
+												
+	Trường hợp thành công và không get được data											
+	Response											
+		Http response: 404										
+		listStore []										
+												
+	Trường hợp error khi validate param											
+		Response										
+			Http response: 400									
+			result: 1									
+			message: lỗi phát sinh									
+												
+3/ API đăng ký thông tin cửa hàng												
+												
+	URI: /store/regist											
+	Method: POST											
+												
+												
+	Request body:											
+		storeID				String (12 ký tự)						là param bắt buộc
+		storeName				String (255 ký tự)						là param bắt buộc
+		storeAddress				String (255 ký tự)						là param bắt buộc
+												
+	Trường hợp thành công											
+		Response										
+			Http response: 200									
+			result: 0									
+												
+	Trường hợp đăng ký thất bại											
+		Response										
+			Http response: 200									
+			result: 1									
+												
+	Trường hợp error khi validate param											
+		Response										
+			Http response: 400									
+			result: 1									
+			message: lỗi phát sinh									
