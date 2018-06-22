@@ -210,3 +210,29 @@ public class AuthenticationAPI extends BaseAPI {
                     super.getLogger().debug("認証処理でエラーが発生しました：受信データ変換エラー");
                     throw new Exception(MessageUtil.ESE003);
                 }
+ // 送信処理
+                // 「電子申請サービス_基底API」.”送受信処理”呼び出す。
+                // [引数][アクセスキー]： 空(empty)をセット
+                // [引数][送信先URI]: [外部連携API管理定義].“URI名称”
+                // [引数][HTTPボディ部]: [リクエスト].” 認証用HTTPボディ”]
+                String apiCode = Constant.API_CODE_AUTHENCATION_LOGIN;
+                String accessKey = Constant.EMPTY_STRING;
+                HttpMethod httpMethod = HttpMethod.POST;
+                Map<String, Object> atoApiData = new HashMap<String, Object>();
+                // (【外部連携API管理定義】は、APIコード=Authentication_loginURIの一致する情報を使用する。)
+                // 外部連携API管理定義を取得するメソッドを呼び出す。
+                resultGetApi = super.getExternalCoopDefinitionAPI(apiCode, atoApiData);
+                if (!resultGetApi) {
+                    super.getLogger().debug("認証処理でエラーが発生しました：外部連携API管理定義を取得エラー");
+                    throw new Exception(MessageUtil.ESE003);
+                }
+
+                String destinationURI = atoApiData.get(Constant.URI_NAME).toString();
+                AtomicReference<String> atoObjectSend = new AtomicReference<String>();
+                // APIコード=Authentication_loginURIを使ってe-Govに送信し、利用者認証を行う。
+                resultHandleSend = super.handleSendReceive(accessKey, destinationURI, httpMethod,
+                        new String((byte[]) receiveDataMap.get(Constant.RECEIVE_DATA)), atoObjectSend, false);
+                if (!resultHandleSend) {
+                    super.getLogger().debug("認証処理でエラーが発生しました：外部連携API送信エラー");
+                    throw new Exception(MessageUtil.ESE003);
+                }
