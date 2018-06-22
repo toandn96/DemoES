@@ -236,3 +236,31 @@ public class AuthenticationAPI extends BaseAPI {
                     super.getLogger().debug("認証処理でエラーが発生しました：外部連携API送信エラー");
                     throw new Exception(MessageUtil.ESE003);
                 }
+ // [引数][HTTPボディ部]: [リクエスト].”認証用HTTPボディ”
+                // 返信データ作成処理
+                // 作成した【レスポンスデータ】を、JSON形式に変換して、呼出元（通信ライブラリ）に返却する。
+                AtomicReference<Object> atoResultInfo = new AtomicReference<Object>(atoObjectSend.get());
+                resultAuthentication = createAuthenticationResult(atoResultInfo);
+                if (!resultAuthentication) {
+                    super.getLogger().debug("認証処理でエラーが発生しました：利用者認証結果作成エラー");
+                    throw new Exception(MessageUtil.ESE003);
+                }
+
+                resultInfo.set(atoResultInfo.get().toString());
+            }
+        } catch (Exception ex) {
+            super.getLogger().error("認証処理でエラーが発生しました", ex);
+            AccessLogWriter.writeLine("【処理エラー】" + ex.toString());
+            String messageError = ex.getMessage();
+            if (ex instanceof IOException) {
+                messageError = MessageUtil.ESE003;
+            }
+            // メッセージ返答、ログ出力、処理の中断を行なう。
+            super.getLogger().error(MessageUtil.getMessage(ex.getMessage())[1]);
+            // エラーレスポンスをJSON形式で作成する.
+            return MessageUtil.createJsonErrorResponse(messageError);
+		} finally {
+			if (isWriteAccesslog) AccessLogWriter.writeLine("【処理終了】利用者認証");
+        }
+        return resultInfo.get();
+    }
