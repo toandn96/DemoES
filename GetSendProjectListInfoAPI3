@@ -1,0 +1,290 @@
+/**
+    
+     * @param param         パラメーター
+     * <ul>
+     *  <li>loginId         ログインID</li>
+     *  <li>userId          利用者ID</li>
+     *  <li>certificate     証明書</li>
+     *  <li>SendDateFrom    対象期間(開始日)</li>
+     *  <li>SendDateTo      対象期間(終了日)</li>
+     *  <li>ProcessKbn      処理区分</li>
+     *      <ul>
+     *          <li>1:申請データ作成、</li>
+     *          <li>2:署名データ送信</li>
+     *      </ul>
+     *  <li>HttpBodyLogin       認証用HTTPボディ</li>
+     *  <li>HttpBodyApply       申請用HTTPボディ</li>
+     *  <li>ProcedureParams     手続別パラメータ</li>
+     *  </ul>
+
+    @SuppressWarnings({ "unchecked" })
+    @RequestMapping("/projectlistinfo/get/date")
+    public String getSendProjectListInfoWithSendDate(@RequestBody String body, 
+            @RequestParam(value = Constant.PARAM, defaultValue = Constant.EMPTY_STRING) String param) throws Exception {
+
+    
+    	if ("".equals(param)) {
+    		param = body;
+    	}
+
+        Map<String, Object> paramMap = new HashMap<String, Object>();
+        // 結果情報
+        AtomicReference<String> resultInfo = new AtomicReference<String>();
+        try {
+            AccessLogWriter.writeLine("【処理開始】送信案件一覧情報取得-送信日時指定");
+            boolean checkConvertSendReceviceData = false;
+            boolean checkConvertMapToJson = false;
+            boolean checkInfoCallFromAPI = false;
+            boolean checkGetAccessKeyAndCode = false;
+            boolean checkGetUriApi = false;
+            boolean checkCreateDataReponse = false;
+            AtomicReference<String> processCode = new AtomicReference<String>();
+            String httpBody = Constant.EMPTY_STRING;
+            String infoAuthentication = Constant.EMPTY_STRING;
+            AtomicReference<String> accessKey = new AtomicReference<String>();
+            // 置換開始日文字列
+            String specialStartPeriod = Constant.EMPTY_STRING;
+            // 置換終了日文字列
+            String specialEndPeriod = Constant.EMPTY_STRING;
+            // 送信先URI
+            String destinationURI = Constant.EMPTY_STRING;
+            // APIコード
+            String apiCode = Constant.EMPTY_STRING;
+
+            try {
+                super.convertJsonToMap(param, paramMap);
+			} catch (JsonParseException e) {
+            	return MessageUtil.createJsonErrorResponse(MessageUtil.ESE003);
+			}
+            if (!new ParameterUtil().check(paramMap, true)) {
+            	return MessageUtil.createJsonErrorResponse(MessageUtil.ESE003);
+            }
+            // ログインID
+            String loginId = paramMap.get(Constant.LOGIN_ID).toString();
+            // 利用者ID
+            String userId = paramMap.get(Constant.USER_ID).toString();
+            // 証明書
+            String certificate = paramMap.get(Constant.CERTIFICATE).toString();
+            // 対象期間(開始日)
+            String sendDateFrom = paramMap.get(Constant.SEND_DATE_FROM).toString();
+            // 対象期間(終了日)
+            String sendDateTo = paramMap.get(Constant.SEND_DATE_TO).toString();
+            // 処理区分
+            String processKbn = paramMap.get(Constant.PROCESS_KBN).toString();
+            // 手続別パラメーター
+            Map<String, Object> procedureParams;
+			try {
+				procedureParams = (Map<String, Object>) paramMap.get(Constant.PROCEDURE_PARAMS);
+			} catch (ClassCastException e) {
+            	return MessageUtil.createJsonErrorResponse(MessageUtil.ESE003);
+			}
+
+            // 処理手順１([リクエスト].”処理区分”＝１)
+            if (Constant.PROCESS_KBN_1.equals(processKbn)) {
+                // 利用者認証送信パラメーター作成処理
+                // 「電子申請サービス_基底API」."利用者認証送信パラメーター取得"のAPIを使用して、 HTTPボディ部を取得する。
+                // 引数：[リクエスト].”利用者ID“
+                // 戻り値：【HTTPボディ部】の文字列
+                httpBody = super.getParamTransmitAuthentication(userId);
+                if (httpBody.equals(Constant.EMPTY_STRING)) {
+                    throw new Exception(MessageUtil.ESE003);
+                }
+
+                // データマップを作成します。
+                byte[] byteData = httpBody.getBytes(StandardCharsets.UTF_8);
+                Map<String, Object> sendDataMap = FunctionUtil.createDataMapSend(byteData, new Object(),
+                		loginId);
+                // 送信データ作成。
+                checkConvertSendReceviceData = super.convertSendReceiveDataFormat(sendDataMap,
+                        Constant.CONVERT_DIVISION_0);
+                if (!checkConvertSendReceviceData) {
+                    throw new Exception(MessageUtil.ESE003);
+                }
+
+                Map<String, Object> fileFormatMap = new HashMap<String, Object>();
+                fileFormatMap.put(Constant.SEND_DATE_FROM, sendDateFrom);
+                fileFormatMap.put(Constant.SEND_DATE_TO, sendDateTo);
+                Map<String, Object> mapReponse = new HashMap<String, Object>();
+                mapReponse.put(Constant.USER_ID, userId);
+                mapReponse.put(Constant.CERTIFICATE, certificate);
+                mapReponse.put(Constant.HTTP_BODY_LOGIN, sendDataMap.get(Constant.SEND_DATA));
+                mapReponse.put(Constant.PROCEDURE_PARAMS, fileFormatMap);
+                checkConvertMapToJson = super.convertMapToJson(mapReponse, resultInfo);
+                if (!checkConvertMapToJson) {
+                    throw new Exception(MessageUtil.ESE003);
+                }
+
+            // 処理手順2([リクエスト].”処理区分”＝2)
+            } else if (Constant.PROCESS_KBN_2.equals(processKbn)) {
+                // 「利用者認証API」.利用者認証をメソッドを呼び出す。
+                AuthenticationAPI authentication = new AuthenticationAPI();
+                infoAuthentication = authentication.authenticateUser(param);
+                Map<String, Object> mapDataResponeAuth = new HashMap<String, Object>();
+                super.convertJsonToMap(infoAuthentication, mapDataResponeAuth);
+                String code = String.valueOf(mapDataResponeAuth.get(Constant.CODE));
+                if (Integer.parseInt(code) == Constant.ERROR_CODE || Integer.parseInt(code) == Constant.EXCEPTION_CODE) {
+                    return infoAuthentication;
+                }
+                // アクセスキー及びコード取得ファンクション. e-Govの反応からアクセスキーとコード情報取得の処理。
+                checkGetAccessKeyAndCode = super.getAccessKeyAndCode(infoAuthentication, accessKey, processCode);
+                if (!checkGetAccessKeyAndCode) {
+                    throw new Exception(MessageUtil.ESE003);
+                }
+
+                // 成功した時
+                // 結果情報より【処理結果コード】と【アクセスキー】を取得する。
+                // 失敗した時( 【処理結果コード】 = 1 )
+                // 処理を中断し、次の値を返す。
+                // 1 エラーコード：ESE001
+                // 2 エラーメッセージ：サービスが利用できません。
+                // 管理者へ連絡してください。
+                if (processCode.equals(Constant.ERROR_CODE)) {
+                    throw new Exception(MessageUtil.ESE001);
+                }
+
+                // 対象期間(開始日)
+                specialStartPeriod = Constant.SPECIAL_START_PERIOD;
+                // 対象期間(終了日)
+                specialEndPeriod = Constant.SPECIAL_END_PERIOD;
+                // 外部連携API管理定義】は、APIコード=Sinsei_List_DateURIの一致する情報を使用する
+                apiCode = Constant.API_CODE_SINSEI_LIST_DATE;
+                Map<String, Object> atoApiData = new HashMap<String, Object>();
+                // 外部連携API管理定義を取得するメソッドを呼び出す。
+                checkGetUriApi = super.getExternalCoopDefinitionAPI(apiCode, atoApiData);
+                if (!checkGetUriApi) {
+                    throw new Exception(MessageUtil.ESE003);
+                }
+
+                String dateFrom = (String) procedureParams.get(Constant.SEND_DATE_FROM);
+                String dateTo = (String) procedureParams.get(Constant.SEND_DATE_TO);
+                destinationURI = atoApiData.get(Constant.URI_NAME).toString();
+                Map<String, Object> resultInfoFromAPI = new HashMap<String, Object>();
+                // 問合せ_番号指定を処理する. “送信番号”毎に対してe-Govへリクエストし、返りを受ける.
+                checkInfoCallFromAPI = super.inquiryBySpecialPeriod(accessKey.get(), destinationURI, specialStartPeriod,
+                        specialEndPeriod, dateFrom, dateTo, resultInfoFromAPI);
+                if (!checkInfoCallFromAPI) {
+                    throw new Exception(MessageUtil.ESE003);
+                }
+
+                Map<String, Object> mapDataReponse = new HashMap<String, Object>();
+                // e-Govからの返りデータを処理する。返りデータをMap型に変換する。
+                checkCreateDataReponse = createDataReponse(resultInfoFromAPI, mapDataReponse);
+                if (!checkCreateDataReponse) {
+                    throw new Exception(MessageUtil.ESE003);
+                }
+
+                // 返信データ作成処理
+                // 次のパラメータで通信ライブラリを返すJSON形式のデータを作成する。
+                checkConvertMapToJson = super.convertMapToJson(mapDataReponse, resultInfo);
+                if (!checkConvertMapToJson) {
+                    throw new Exception(MessageUtil.ESE003);
+                }
+            }
+        } catch (Exception ex) {
+            super.getLogger().error("送信案件一覧情報取得でエラーが発生しました", ex);
+            AccessLogWriter.writeLine("【処理エラー】" + ex.toString());
+            String messageError = ex.getMessage();
+            if (ex instanceof IOException) {
+                messageError = MessageUtil.ESE003;
+            }
+            // メッセージ返答、ログ出力、処理の中断を行なう。
+            super.getLogger().error(MessageUtil.getMessage(ex.getMessage())[1]);
+            // エラーレスポンスをJSON形式で作成する.
+            return MessageUtil.createJsonErrorResponse(messageError);
+        } catch (OutOfMemoryError e) {
+            AccessLogWriter.writeLine("【処理エラー】" + e.toString());
+            LoggerFactory.getLogger(GetSendProjectListInfoAPI.class).error(e.toString(), e);
+            return MessageUtil.createJsonErrorResponse("送信案件一覧情報取得で内部処理エラーが発生しました。ESE9002");
+        } catch (Throwable th) {
+            AccessLogWriter.writeLine("【処理エラー】" + th.toString());
+            LoggerFactory.getLogger(GetSendProjectListInfoAPI.class).error(th.toString(), th);
+            return MessageUtil.createJsonErrorResponse("送信案件一覧情報取得で内部処理エラーが発生しました。ESE9001");
+		} finally {
+            AccessLogWriter.writeLine("【処理終了】送信案件一覧情報取得-送信日時指定");
+        }
+        return resultInfo.toString();
+    }
+
+    /**
+     * 送信案件一覧結果作成.
+     * @param resultInfo    結果情報
+     * @param jsonResult    JSON結果
+     * @return boolean      実行に成功した場合はtrue、逆はfalseにする。
+     */
+    private boolean createSendProjectListInfoResult(String resultInfo, AtomicReference<String> jsonResult) {
+        // レスポンスデータ】作成処理
+        // で受け取った結果情報を、MAPのLIST形式で追加する。
+        try {
+            String code = Constant.EMPTY_STRING;
+            String message = Constant.EMPTY_STRING;
+            org.json.JSONObject xmlJSONObj = null;
+            xmlJSONObj = XML.toJSONObject(resultInfo.toString());
+            org.json.JSONObject objApplData = new org.json.JSONObject();
+
+            org.json.JSONObject objAuthentication = xmlJSONObj.getJSONObject(Constant.DATA_ROOT);
+            Iterator<String> iteAuthentication = objAuthentication.keys();
+            while (iteAuthentication.hasNext()) {
+                String key = (String) iteAuthentication.next();
+
+                if (Constant.APPL_DATA.equals(key)) {
+                    objApplData = objAuthentication.getJSONObject(Constant.APPL_DATA);
+                } else if (Constant.RESULT.equals(key)) {
+                    code = objAuthentication.getJSONObject(Constant.RESULT).get(Constant.CODE).toString();
+                    message = objAuthentication.getJSONObject(Constant.RESULT).get(Constant.MESSAGE).toString();
+                }
+            }
+
+            objApplData.put(Constant.CODE, code);
+            objApplData.put(Constant.MESSAGE, message);
+            jsonResult.set(objApplData.toString());
+        } catch (Exception e) {
+            // ｘｍｌファイルの構築と異なるJSONオブジェクトを取得する時
+            // ｘｍｌファイルに存在しないキーを取得する時
+            throw (e);
+        }
+        return true;
+    }
+
+    /**
+     * 返りデータ作成ファンクション.
+     * <p>e-Govからの返りデータを処理する。</p>
+     * <p>返りデータをMap型に変換する。</p>
+     * @param mapresult         結果情報
+     * @param mapDataReponse    MAP形式ファイル
+     * @return boolean          実行に成功した場合はtrue、逆はfalseにする。
+     * @throws Exception        例外 
+     * <p>Map<String, Object>構築に従わないMAPファイルを読み込む時</p> 
+     * <p>convertJsonToMap関数を呼び出してFalseの値を返却した時</p> 
+     * <p>createSendProjectListInfoResultの処理関数の呼び出しでエラーになった持</p>
+     */
+    private boolean createDataReponse(Map<String, Object> mapresult, Map<String, Object> mapDataReponse)
+            throws Exception {
+
+        try {
+            List<Map<String, Object>> listMapCreateDataReponse = new ArrayList<Map<String, Object>>();
+
+            for (Map.Entry<String, Object> entry : mapresult.entrySet()) {
+                Map<String, Object> mapCreateDataReponse = new HashMap<String, Object>();
+                AtomicReference<String> jsonCreateSendProject = new AtomicReference<String>();
+                String xmlString = entry.getValue().toString();
+
+                // e-Govからの返りデータに"DataRoot"タグが存在するかチェックする
+                org.json.JSONObject xmlJSONObj = XML.toJSONObject(xmlString);
+                if (!xmlJSONObj.has(Constant.DATA_ROOT)) {
+                    continue;
+                }
+                // string xmlでe-Govからの返りデータを処理する。
+                createSendProjectListInfoResult(xmlString, jsonCreateSendProject);
+                // Map処理からの値を追加する。
+                super.convertJsonToMap(jsonCreateSendProject.toString(), mapCreateDataReponse);
+                listMapCreateDataReponse.add(mapCreateDataReponse);
+            }
+            mapDataReponse.put(Constant.RESULT_LIST, listMapCreateDataReponse);
+
+        } catch (Exception e) {
+            throw (e);
+        }
+        return true;
+    }
+
+}
