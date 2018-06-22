@@ -264,3 +264,19 @@ public class AuthenticationAPI extends BaseAPI {
         }
         return resultInfo.get();
     }
+	 /**
+     * 利用者認証結果作成: 作成した【レスポンスデータ】を、JSON形式に変換して、呼出元（通信ライブラリ）に返却する.
+     * 
+     * @param resultInfo    結果情報
+     * @return boolean      実行に成功した場合はtrue、逆はfalseにする。
+     * @throws Exception    例外
+     * <p>「電子申請サービス_基底API」.”MAP_JSON変換”を実行し例外が発生する場合</p>
+     */
+    private boolean createAuthenticationResult(AtomicReference<Object> resultInfo) throws Exception {
+        boolean result = false;
+        // [レスポンスデータ]作成処理
+        // 受け取った結果情報を、MAPのLIST形式で追加する。
+        String stringXML = (String) resultInfo.get();
+        Map<String, Object> atoMapReponse = new HashMap<String, Object>();
+        JSONObject xmlJSONObj = new JSONObject();
+        xmlJSONObj = XML.toJSONObject(stringXML);
