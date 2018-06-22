@@ -116,3 +116,97 @@ public class AuthenticationAPI extends BaseAPI {
      * @return 認証結果
      * @throws Exception
      */
+    public String authenticateUser(String param) throws Exception {
+    	return authenticateUser(param, false);
+    }
+
+    /**
+     * 利用者認証: 登録済みのユーザ（利用者ID）であるか利用者認証をする.
+     * <p>
+     * 電子申請による申請や発行済み公文書などの各種電子申請処理を行う前に実行する。
+     * </p>
+     * 
+     * @param param パラメーター
+     * @param isWriteAccesslog アクセスログを出力するか。true：出力
+     * @return 認証結果
+     * @throws Exception
+     */
+    protected String authenticateUser(String param, boolean isWriteAccesslog) throws Exception {
+    	
+    	Map<String, Object> paramMap = new HashMap<String, Object>();
+        // 結果情報
+        AtomicReference<String> resultInfo = new AtomicReference<String>();
+        try {
+            if (isWriteAccesslog) AccessLogWriter.writeLine("【処理開始】利用者認証");
+
+            try {
+                super.convertJsonToMap(param, paramMap);
+			} catch (JsonParseException e) {
+            	return MessageUtil.createJsonErrorResponse(MessageUtil.ESE003);
+			}
+            if (!new ParameterUtil().check(paramMap, isWriteAccesslog)) {
+            	return MessageUtil.createJsonErrorResponse(MessageUtil.ESE003);
+            }
+
+            // ログインID
+            String loginId = paramMap.get(Constant.LOGIN_ID).toString();
+            // 利用者ID
+            String userId = paramMap.get(Constant.USER_ID).toString();
+            // 証明書
+            String certificate = paramMap.get(Constant.CERTIFICATE).toString();
+            // 処理区分
+            String processKbn = paramMap.get(Constant.PROCESS_KBN).toString();
+            // 認証用HTTPボディ
+            String httpBodyLogin = paramMap.get(Constant.HTTP_BODY_LOGIN).toString();
+
+            //super.getLogger().trace(loginId + ":" + userId + ":" +  processKbn);
+        	ApplicationProcessingLogWriter.writeLine("【認証】" + loginId + ":" + userId + ":" +  processKbn);
+            
+            String httpBody = Constant.EMPTY_STRING;
+            boolean resultConvertData = false;
+            boolean resultHandleSend = false;
+            boolean resultAuthentication = false;
+            boolean resultGetApi = false;
+
+            // 利用者認証データ作成処理
+            // 処理手順１([リクエスト].”処理区分”＝１（申請データ作成）の場合)
+            if (Constant.PROCESS_KBN_1.equals(processKbn)) {
+                // 「電子申請サービス_基底API」."利用者認証送信パラメーター取得"を使用する。
+                // 引数：[リクエスト].”利用者ID“
+                // 戻り値：[HTTPボディ部]の文字列
+                httpBody = super.getParamTransmitAuthentication(userId);
+                if (httpBody.equals(Constant.EMPTY_STRING)) {
+                    super.getLogger().debug("認証処理でエラーが発生しました：httpBody is EMPTY_STRING");
+                    throw new Exception(MessageUtil.ESE003);
+                }
+                // 「電子申請サービス_基底API」."送受信データ形式変換"を使用する。
+                // 引数：[リクエスト].”HTTPボディ部“
+                // データマップを作成します。
+                byte[] byteData = httpBody.getBytes(StandardCharsets.UTF_8);
+                Map<String, Object> sendDataMap = 
+                        FunctionUtil.createDataMapSend(byteData, new Object(), loginId);
+                // 送信データ作成。
+                resultConvertData = super.convertSendReceiveDataFormat(sendDataMap, Constant.CONVERT_DIVISION_0);
+                // (resultConvertData=false)の場合
+                if (!resultConvertData) {
+                    super.getLogger().debug("認証処理でエラーが発生しました：受信データ変換エラー");
+                    throw new Exception(MessageUtil.ESE003);
+                }
+                // 署名用レスポンスデータ作成処理
+                // 署名用レスポンスデータ作成し呼出元（通信ライブラリ）に返却する。
+                Map<String, Object> mapReponse = new HashMap<String, Object>();
+                mapReponse.put(Constant.USER_ID, userId);
+                mapReponse.put(Constant.CERTIFICATE, certificate);
+                mapReponse.put(Constant.HTTP_BODY_LOGIN, sendDataMap.get(Constant.SEND_DATA));
+                super.convertMapToJson(mapReponse, resultInfo);
+
+            // 処理手順２([リクエスト].”処理区分”＝２（署名データ送信）の場合)
+            } else if (Constant.PROCESS_KBN_2.equals(processKbn)) {
+                // e-Govから返却されたデータファイルをデコードする。
+                Map<String, Object> receiveDataMap = FunctionUtil.createDataMapReceive(httpBodyLogin, new Object());
+                // 受信データ取得。
+                resultConvertData = super.convertSendReceiveDataFormat(receiveDataMap, Constant.CONVERT_DIVISION_1);
+                if (!resultConvertData) {
+                    super.getLogger().debug("認証処理でエラーが発生しました：受信データ変換エラー");
+                    throw new Exception(MessageUtil.ESE003);
+                }
