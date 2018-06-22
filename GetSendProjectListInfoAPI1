@@ -1,0 +1,104 @@
+package jp.co.melb.pp.es.api;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
+
+import org.codehaus.jackson.JsonParseException;
+import org.json.XML;
+import org.slf4j.LoggerFactory;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import jp.co.melb.pp.es.api.common.QueryAPI;
+import jp.co.melb.pp.es.common.Constant;
+import jp.co.melb.pp.es.common.FunctionUtil;
+import jp.co.melb.pp.es.common.MessageUtil;
+import jp.co.melb.pp.es.common.ParameterUtil;
+import jp.co.melb.pp.es.common.log.AccessLogWriter;
+
+/**
+ * 送信案件一覧情報取得.
+ * <p>
+ * API利用ソフトウェアからの送信案件一覧情報取得要求を受け付け、指定された条件（送信番号または取得対象期間）に合致する送信案件情報を抽出し、
+ * 以下の情報を応答します。
+ * </p>
+ * <p>
+ * 送信案件一覧情報取得サービスでは、電子申請ツール等のクライアントからの要求を受けて、 送信案件情報（送信番号、到達番号、申請状況等）を取得する。
+ * </p>
+ * <p>
+ * 当該サービスにおいて送信案件情報を取得する条件は、「送信番号」と「取得対象期間」の二通り存在し、どちらか一方を指定する。
+ * </p>
+ * 
+ * @author giang-nt2
+ * @version 1.0.0
+ */
+@RestController
+public class GetSendProjectListInfoAPI extends QueryAPI {
+
+    /**
+     * 送信案件一覧情報取得(送信番号指定).
+     * <p>取得条件として送信番号を指定する場合、一回の取得要求にて複数の送信番号の受け付けを可とする。</p>
+     * <p>利用する外部連携APIは「利用者認証」、「送信案件一覧情報取得」である。</p>
+     * <pre><code>
+     * 本APIのメイン処理は以下になる。
+     * 処理手順１([リクエスト].”処理区分”＝１（申請データ作成）の場合)
+     *  ステップ 1: JSONをパラメータに変換して処理する。
+     *  ステップ 2:  「電子申請サービス_基底API」."利用者認証送信パラメーター取得" を使って 【HTTPボディ部】を取得する。
+     *  ステップ 3: 【機密情報交換サービス】を呼び出し、 【HTTPボディ部】に対して送信データを形式化する。
+     *  ステップ 4: Mapレスポンスデータを作成する。
+     *  ステップ 5: Mapをjson形式に変換して【通信ライブラリ】を返す。
+     * 処理手順２([リクエスト].”処理区分”＝２（署名データ送信）の場合)
+     *  ステップ1: AuthenticationAPIを呼び出す。
+     *      ステップ1: G【機密情報交換サービス】を呼び出し【HTTPボディ部】 に対して受信データを形式化する。
+     *      ステップ2: 「電子申請サービス_基底API」.”送受信処理” を使って 【e-Gov申請手続き】 まで呼び出す。
+     *      ステップ 3: 【e-Gov申請手続き】からの反却結果をJsonへ変換し、呼び出し元へ返す。
+     *  ステップ2: 応答結果から、成功の場合は 【アクセスキー】を取得する。失敗の場合はエラーメッセージESE001を通知する。
+     *  ステップ3: 送信処理（通常）
+     *      ループを始める。
+     *          ステップ1:パラメータを取得する。
+     *              アクセスキー : ステップ２で取得した。
+     *              送信先URI : APIコード= Sinsei_List_idURI で 【外部連携API管理定義】.“URI名称” 
+     *              から取得される。
+     *                  {SendNumber}：[手続別パラメーター].[送信番号List].”送信番号”
+     *              HTTPボディ部 : セットしない。
+     *          ステップ 2:  「電子申請サービス_基底API」.”送受信処理”を使って【e-Gov申請手続き】 まで呼び出す。
+     *          ステップ 3: 受信データを処理して List(of Map) に追加する。
+     *      ループを終了する。
+     *  ステップ 4: List(of Map)をJSONに変換して【通信ライブラリ】へ返す。
+     * </code></pre>
+     * @param param             パラメーター
+     * <ul>
+     *  <li>loginId         ログインID</li>
+     *  <li>userId          利用者ID</li>
+     *  <li>certificate     証明書</li>
+     *  <li>SendNumberLIST  送信番号List</li>
+     *  <li>ProcessKbn      処理区分</li>
+     *      <ul>
+     *          <li>1:申請データ作成、</li>
+     *          <li>2:署名データ送信</li>
+     *      </ul>
+     *  <li>HttpBodyLogin       認証用HTTPボディ </li>
+     *  <li>HttpBodyApply       申請用HTTPボディ </li>
+     *  <li>ProcedureParams     手続別パラメーター </li>
+     *  </ul>
+     * @return resultInfo       結果情報
+     * @throws Exception        例外
+     * <p>httpBody = emptyの場合</p>
+     * <p>httpBodyの暗号化でfalseが返される場合</p>
+     * <p>JSON文字列をMAPに変換してfalseが返される場合</p>
+     * <p>送信先URI = emptyの場合 </p>
+     * <p>「電子申請サービス_基底API」.”送受信処理”呼び出す。 実行に成功した場合はfalse</p>
+     * <p>“返りデータ作成”呼び出す。 実行に成功した場合はfalse</p>
+     * <p>“MAP形式ファイルをJSON形式に変換”呼び出す。 実行に成功した場合はfalse</p>
+     * @see RestController
+     * @see RequestMapping
+     * @see RequestParam
+     */
